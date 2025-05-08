@@ -75,17 +75,39 @@ fn dump_spi_flash(port: &String, filename: &String) {
         Ok(f) => f,
         Err(e) => panic!("{}", e)
     };
-
     for offset in 0..32768 {
-        match uart::command_readspiflash(&port, offset) {
-            Ok(Some(data)) => {
-                print!("\rDumping SPI flash from address {:#06x}", offset);
-                fw.write_all(&data).expect("Failed to dump SPI flash")
+        let mut retries = 0;
+        let max_retries = 3;
+        
+        loop {
+            match uart::command_readspiflash(&port, offset) {
+                Ok(Some(data)) => {
+                    print!("\rDumping SPI flash from address {:#06x}", offset);
+                    fw.write_all(&data).expect("Failed to dump SPI flash");
+                    break; 
+                },
+                Ok(None) => {
+                    break;
+                },
+                Err(e) => {
+                    if retries < max_retries {
+                        retries += 1;
+                        println!("\rTimeout at {:#06x}, retrying ({}/{})", offset, retries, max_retries);
+                        std::thread::sleep(std::time::Duration::from_millis(100)); // Pequeña pausa antes de reintentar
+                        continue;
+                    } else {
+                        panic!("{}. Is the radio in normal mode? Failed after {} retries at offset {:#06x}", 
+                               e, max_retries, offset);
+                    }
+                }
             }
-            Ok(None) => break,
-            Err(e) => panic!("{}. Is the radio in normal mode?", e)
+        }
+        if matches!(uart::command_readspiflash(&port, offset), Ok(None)) {
+            break;
         }
     }
+
+
 }
 
 fn restore_spi_flash(port: &String, calib_only: bool, filename: &String) -> Result<bool> {
